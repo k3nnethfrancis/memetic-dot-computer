@@ -1,0 +1,31 @@
+
+
+# python
+.env
+__pycache__
+__pycache__/
+.pyc
+.DS_Store
+.vscode
+.idea
+
+# logs
+logs/
+
+# environments
+venv/
+learning_venv/
+gguf-venv/
+obsidian_search_env/
+mlx-venv/
+
+# files
+profile.PNG
+.png
+posts/
+
+# modelfiles
+utils/Modelfile
+
+# weights
+weights/*
