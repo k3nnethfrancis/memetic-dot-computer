@@ -1,14 +1,16 @@
-from typing import List, Generator
+import asyncio
 import logging
 import json
+from typing import List, AsyncGenerator
 from llama_index.llms.ollama import Ollama
 from cognition.models.chat_models import ChatMessage
+from cognition.llms.base_llm import BaseLLM
 import tiktoken
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class OllamaModel:
+class OllamaModel(BaseLLM):
     def __init__(self, model: str = "llama3.1", request_timeout: float = 120.0):
         self.model = model
         self.request_timeout = request_timeout
@@ -26,24 +28,47 @@ class OllamaModel:
             return text
         return self.tokenizer.decode(tokens[:max_tokens])
 
-    def generate(self, messages: List[ChatMessage]) -> str:
+    async def generate(self, messages: List[ChatMessage]) -> str:
         """Generate a response to a list of chat messages."""
         logger.info(f"Generating response for messages: {messages}")
         try:
             serialized_messages = self._serialize_messages(messages)
-            response = self.llm.complete(serialized_messages)
+            response = await self.llm.acomplete(serialized_messages)
             logger.info(f"Generated response: {response}")
             return str(response)
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
             raise
 
-    def generate_json(self, prompt: str) -> dict:
+    async def stream(self, messages: List[ChatMessage]) -> AsyncGenerator[str, None]:
+        """Stream a response to a list of chat messages."""
+        logger.info(f"Streaming response for messages: {messages}")
+        try:
+            serialized_messages = self._serialize_messages(messages)
+            stream_response = await self.llm.astream_complete(serialized_messages)
+            async for token in self._async_iterate(stream_response):
+                yield token.delta
+        except Exception as e:
+            logger.error(f"Error streaming response: {str(e)}")
+            raise
+
+    async def _async_iterate(self, async_iterable):
+        while True:
+            try:
+                yield await async_iterable.__anext__()
+            except StopAsyncIteration:
+                break
+
+    async def function_call(self, function_name: str, function_args: dict) -> str:
+        """Implement function calling if supported by Ollama, otherwise raise NotImplementedError."""
+        raise NotImplementedError("Function calling is not implemented for Ollama models.")
+
+    async def generate_json(self, prompt: str) -> dict:
         """Generate a JSON response to a prompt."""
         logger.info(f"Generating JSON response for prompt: {prompt}")
         try:
             json_llm = Ollama(model=self.model, request_timeout=self.request_timeout, json_mode=True)
-            response = json_llm.complete(prompt)
+            response = await json_llm.acomplete(prompt)
             json_response = json.loads(str(response))
             logger.info(f"Generated JSON response: {json_response}")
             return json_response
@@ -51,23 +76,12 @@ class OllamaModel:
             logger.error(f"Error generating JSON response: {str(e)}")
             raise
 
-    def stream(self, messages: List[ChatMessage]) -> Generator[str, None, None]:
-        """Stream a response to a list of chat messages."""
-        logger.info(f"Streaming response for messages: {messages}")
-        try:
-            serialized_messages = self._serialize_messages(messages)
-            for token in self.llm.stream_complete(serialized_messages):
-                yield token.delta
-        except Exception as e:
-            logger.error(f"Error streaming response: {str(e)}")
-            raise
-
     def _serialize_messages(self, messages: List[ChatMessage]) -> str:
         """Serialize ChatMessage objects into a string format."""
         return "\n".join([f"{msg.role}: {msg.content}" for msg in messages])
 
 # Example usage
-if __name__ == "__main__":
+async def main():
     ollama = OllamaModel(model="llama3.1")
 
     messages = [
@@ -77,16 +91,19 @@ if __name__ == "__main__":
 
     # Generate
     print("Generate:")
-    response = ollama.generate(messages)
+    response = await ollama.generate(messages)
     print(response)
 
     # Stream
     print("\nStream:")
-    for token in ollama.stream(messages):
+    async for token in ollama.stream(messages):
         print(token, end="", flush=True)
     print()
 
     # Generate JSON
     print("\nGenerate JSON:")
-    json_response = ollama.generate_json("Who is Paul Graham? Output as a structured JSON object.")
+    json_response = await ollama.generate_json("Who is Paul Graham? Output as a structured JSON object.")
     print(json.dumps(json_response, indent=2))
+
+if __name__ == "__main__":
+    asyncio.run(main())
